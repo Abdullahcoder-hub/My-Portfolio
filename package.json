@@ -1,0 +1,7 @@
+{
+  "name": "my-portfolio",
+  "private": true,
+  "scripts": {
+    "dev": "node server.cjs"
+  }
+}

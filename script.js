@@ -11,10 +11,10 @@ if (cursor) {
 
 /* ============================================================
    RESPONSIVE FULL-PAGE SCROLL FRAME ENGINE
-
-   Cover mode is used for both desktop and mobile to ensure 
-   the human subject occupies full background height and width 
-   without blank borders or shrinking.
+   
+   - Laptops / Desktops / Tablets (> 767px) ALWAYS use Desktop frames
+   - Mobile Phones (<= 767px) ALWAYS use Mobile frames
+   - Background pre-fetching does NOT hijack activeType
    ============================================================ */
 
 const canvas = document.getElementById("frame-canvas");
@@ -22,32 +22,40 @@ const ctx = canvas ? canvas.getContext("2d", { alpha: true }) : null;
 
 const sequences = {
   desktop: {
-    count: 239,
     folder: "assets/frames/desktop",
-    frames: new Array(239)
+    frames: [],
+    count: 239,
+    digits: 4,
+    ext: "webp"
   },
   mobile: {
-    count: 300,
     folder: "assets/frames/mobile",
-    frames: new Array(300)
+    frames: [],
+    count: 300,
+    digits: 4,
+    ext: "webp"
   }
 };
 
 let activeType = null;
-let currentFrame = -1;
+let currentFrame = 0;
 let raf = 0;
 let loadToken = 0;
 
 function isMobile() {
-  return window.matchMedia("(max-width: 767px)").matches;
+  // Mobile sequence ONLY for phone viewports <= 767px
+  return window.innerWidth <= 767;
 }
 
 function getType() {
   return isMobile() ? "mobile" : "desktop";
 }
 
-function framePath(type, index) {
-  return `${sequences[type].folder}/frame_${String(index).padStart(4, "0")}.webp`;
+function formatFramePath(type, index) {
+  const seq = sequences[type];
+  const digits = seq.digits || 4;
+  const ext = seq.ext || "webp";
+  return `${seq.folder}/frame_${String(index).padStart(digits, "0")}.${ext}`;
 }
 
 function resizeCanvas() {
@@ -58,22 +66,23 @@ function resizeCanvas() {
   canvas.style.width = `${window.innerWidth}px`;
   canvas.style.height = `${window.innerHeight}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  drawFrame(currentFrame < 0 ? 0 : currentFrame);
-}
-
-function drawCover(img, w, h) {
-  const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
-  const dw = img.naturalWidth * scale;
-  const dh = img.naturalHeight * scale;
-  const dx = (w - dw) / 2;
-  const dy = (h - dh) / 2;
-  ctx.drawImage(img, dx, dy, dw, dh);
+  drawFrame(currentFrame);
 }
 
 function drawFrame(index) {
-  if (!ctx) return;
+  if (!ctx || !activeType) return;
   const sequence = sequences[activeType];
-  const image = sequence?.frames[index];
+  let image = sequence?.frames[index];
+
+  // Nearest frame fallback if current target frame is downloading
+  if (!image || !image.complete || !image.naturalWidth) {
+    for (let fallback = index; fallback >= 0; fallback--) {
+      if (sequence?.frames[fallback]?.complete && sequence?.frames[fallback]?.naturalWidth) {
+        image = sequence.frames[fallback];
+        break;
+      }
+    }
+  }
 
   if (!image || !image.complete || !image.naturalWidth) return;
 
@@ -81,8 +90,28 @@ function drawFrame(index) {
   const h = window.innerHeight;
 
   ctx.clearRect(0, 0, w, h);
-  // Always use cover mode so the human subject fills the screen clearly
-  drawCover(image, w, h);
+
+  if (activeType === "desktop") {
+    /* Desktop sequence rendering for Laptops & Desktops */
+    const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight);
+    const dw = image.naturalWidth * scale;
+    const dh = image.naturalHeight * scale;
+
+    const dx = (w - dw) / 2;
+    const dy = Math.max(0, (h - dh) / 2);
+
+    ctx.drawImage(image, dx, dy, dw, dh);
+  } else {
+    /* Mobile sequence rendering for Phones */
+    const scale = Math.max(w / image.naturalWidth, h / image.naturalHeight);
+    const dw = image.naturalWidth * scale;
+    const dh = image.naturalHeight * scale;
+
+    const dx = (w - dw) / 2;
+    const dy = (h - dh) / 2;
+
+    ctx.drawImage(image, dx, dy, dw, dh);
+  }
 }
 
 function renderFromScroll() {
@@ -97,6 +126,8 @@ function renderFromScroll() {
   );
 
   const sequence = sequences[activeType];
+  if (!sequence || sequence.count <= 0) return;
+
   const target = Math.min(
     sequence.count - 1,
     Math.floor(progress * (sequence.count - 1))
@@ -114,36 +145,45 @@ function requestFrameRender() {
   if (!raf) raf = requestAnimationFrame(renderFromScroll);
 }
 
-function loadSequence(type) {
+function loadSequence(type, isBackgroundPreload = false) {
   const sequence = sequences[type];
   const token = ++loadToken;
 
-  if (sequence.frames[0]) {
+  if (!isBackgroundPreload) {
     activeType = type;
-    currentFrame = 0;
-    resizeCanvas();
-    requestFrameRender();
   }
 
-  sequence.frames.forEach((_, i) => {
-    if (sequence.frames[i]) return;
+  // Preload frame 0 immediately
+  if (!sequence.frames[0]) {
+    const f0 = new Image();
+    f0.decoding = "sync";
+    f0.onload = () => {
+      sequence.frames[0] = f0;
+      if (!isBackgroundPreload && token === loadToken && activeType === type) {
+        resizeCanvas();
+        drawFrame(0);
+      }
+    };
+    f0.src = formatFramePath(type, 0);
+  } else if (!isBackgroundPreload && token === loadToken && activeType === type) {
+    resizeCanvas();
+    drawFrame(currentFrame);
+  }
+
+  // Preload all frames in sequence
+  for (let i = 0; i < sequence.count; i++) {
+    if (sequence.frames[i]) continue;
 
     const img = new Image();
     img.decoding = "async";
-    img.src = framePath(type, i);
-
     img.onload = () => {
       sequence.frames[i] = img;
-
-      if (token === loadToken && activeType === type && i === 0) {
-        currentFrame = 0;
-        resizeCanvas();
-        requestFrameRender();
+      if (!isBackgroundPreload && token === loadToken && activeType === type && (i === currentFrame || i === 0)) {
+        drawFrame(currentFrame);
       }
     };
-
-    img.onerror = () => {};
-  });
+    img.src = formatFramePath(type, i);
+  }
 }
 
 function switchSequenceIfNeeded() {
@@ -151,8 +191,8 @@ function switchSequenceIfNeeded() {
 
   if (nextType !== activeType) {
     activeType = nextType;
-    currentFrame = -1;
-    loadSequence(nextType);
+    currentFrame = 0;
+    loadSequence(nextType, false);
   }
 
   resizeCanvas();
@@ -161,16 +201,25 @@ function switchSequenceIfNeeded() {
 
 window.addEventListener("scroll", requestFrameRender, { passive: true });
 window.addEventListener("resize", switchSequenceIfNeeded);
+window.addEventListener("orientationchange", switchSequenceIfNeeded);
 
-/* Initialize sequence */
-if (canvas) {
+/* Initialize sequence on page load */
+function initSequence() {
   activeType = getType();
-  loadSequence(activeType);
+  resizeCanvas();
+  loadSequence(activeType, false);
 
+  // Background preloading for secondary sequence (does NOT hijack activeType)
   window.setTimeout(() => {
     const other = activeType === "desktop" ? "mobile" : "desktop";
-    loadSequence(other);
-  }, 800);
+    loadSequence(other, true);
+  }, 1200);
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initSequence);
+} else {
+  initSequence();
 }
 
 /* Scroll reveal animation */
