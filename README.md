@@ -74,3 +74,21 @@ The full-page scroll position controls whichever sequence is active. If the visi
 
 ### GitHub/Vercel optimization
 The frame JPGs were converted to WebP at quality 72 to substantially reduce repository/deployment size while keeping the visual quality suitable for a portfolio.
+
+
+## Automatic GitHub project sync
+
+The portfolio now reads public repositories from `Abdullahcoder-hub` through the GitHub public API.
+
+- New public repositories can appear automatically in **More projects, automatically.**
+- The portfolio refreshes its cached repository list every 10 minutes.
+- Forks are ignored.
+- Featured projects remain manually highlighted at the top.
+- To make a deployment appear as **Open Live**, set the repository's GitHub **Homepage** field to the deployment URL (for example, its Vercel URL).
+- This keeps deployment URLs out of frontend secrets; never put a Vercel/API token in this static portfolio.
+
+### Adding a new project
+
+1. Create the public GitHub repository.
+2. If it has a deployment, open the repository's GitHub settings and set **Homepage** to the live URL.
+3. Deploy/update this portfolio only when you want changes to the portfolio itself. The repository list is fetched at runtime, so new public repos do not require editing `index.html`.
